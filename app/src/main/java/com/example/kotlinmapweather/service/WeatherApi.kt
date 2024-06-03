@@ -1,6 +1,6 @@
-package com.example.kotlinmapweather.data.network.weather
+package com.example.kotlinmapweather.service
 
-import com.example.kotlinmapweather.data.model.weather.WeatherResponse
+import com.example.kotlinmapweather.model.WeatherResponse
 import io.reactivex.Single
 import retrofit2.http.GET
 import retrofit2.http.Query
