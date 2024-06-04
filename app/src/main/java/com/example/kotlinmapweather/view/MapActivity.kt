@@ -11,6 +11,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.kotlinmapweather.R
+import com.example.kotlinmapweather.model.WeatherResponse
+import com.example.kotlinmapweather.service.WeatherRetrofitClient
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.observers.DisposableSingleObserver
+import io.reactivex.schedulers.Schedulers
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -24,8 +30,14 @@ class MapActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
     private var tapMarker: Marker? = null
-    private var latitude: Double = 41.0086
-    private var longitude: Double = 28.9802
+
+    private lateinit var locationManager: LocationManager
+    private lateinit var location: Location
+    private var latitude: Double = 41.0082
+    private var longitude: Double = 28.9784
+
+    private val disposible = CompositeDisposable()
+    private var weatherResponse: WeatherResponse? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +49,27 @@ class MapActivity : AppCompatActivity() {
             insets
         }
 
+        fun getWeatherData(latitude: Double, longitude: Double, callback: (WeatherResponse) -> Unit) {
+            disposible.add(
+                WeatherRetrofitClient().getWeather(latitude, longitude)
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribeWith(object : DisposableSingleObserver<WeatherResponse>() {
+                        override fun onSuccess(response: WeatherResponse) {
+                            callback(response)
+                        }
+
+                        override fun onError(e: Throwable) {
+                            Toast.makeText(this@MapActivity, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+            )
+        }
+
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+
+        getLocation()
+
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), 1)
         }
@@ -47,7 +80,7 @@ class MapActivity : AppCompatActivity() {
         mapView.setMultiTouchControls(true)
 
         val mapController = mapView.controller
-        mapController.setZoom(15.0)
+        mapController.setZoom(12.0)
         val startPoint = GeoPoint(latitude, longitude)
         mapController.setCenter(startPoint)
 
@@ -59,11 +92,15 @@ class MapActivity : AppCompatActivity() {
                 tapMarker = Marker(mapView)
                 tapMarker?.position = p
                 tapMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                tapMarker?.title = "Tapped Location"
-                mapView.overlays.add(tapMarker)
-                mapView.invalidate()
-                latitude = p.latitude
-                longitude = p.longitude
+
+                getWeatherData(p.latitude, p.longitude) { response ->
+                    weatherResponse = response
+                    tapMarker?.title = response.name
+                    tapMarker?.snippet = "${((response.main?.temp)!! - 273.15).toInt()}°C \n" +
+                            "${response.weather?.get(0)?.main}"
+                    mapView.overlays.add(tapMarker)
+                    mapView.invalidate()
+                }
                 return true
             }
 
@@ -74,7 +111,6 @@ class MapActivity : AppCompatActivity() {
 
         val mapEventsOverlay = MapEventsOverlay(mapEventsReceiver)
         mapView.overlays.add(mapEventsOverlay)
-
     }
 
     override fun onResume() {
@@ -85,5 +121,27 @@ class MapActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         mapView.onPause()
+    }
+
+    private fun getLocation() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)!!
+
+            latitude = location.latitude
+            longitude = location.longitude
+        } else {
+            ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), 1)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                getLocation()
+            } else {
+                Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 }
